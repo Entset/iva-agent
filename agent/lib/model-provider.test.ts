@@ -14,8 +14,11 @@ import fc from "fast-check";
 import {
   MODEL_PROVIDERS,
   MODEL_PROVIDER_NAMES,
+  invalidHelperProviderMessage,
   invalidModelProviderMessage,
   missingModelMessage,
+  modelProviderModel,
+  resolveHelperProvider,
   resolveModelProvider,
 } from "./model-provider.ts";
 
@@ -942,4 +945,100 @@ test("property: only OpenCode strips the wizard prefix from the vision model too
     ),
     RUNS,
   );
+});
+
+// Помощник у своего провайдера (HELPER_PROVIDER): пусто — провайдер чата и прежнее правило
+// HELPER_MODEL; имя — его провайдер, его модель или модель чата этого провайдера.
+const providerName = fc.constantFrom(...NAMES_WITH_DEFAULT);
+const modelValue = fc.option(
+  fc.oneof(
+    fc.constantFrom("", "  "),
+    fc.stringMatching(/^[a-z][a-z0-9.:/-]{0,20}$/),
+  ),
+  { nil: undefined },
+);
+
+test("an empty helper provider keeps the chat provider and the old HELPER_MODEL rule", () => {
+  fc.assert(
+    fc.property(
+      providerName,
+      fc.constantFrom(undefined, ""),
+      modelValue,
+      modelValue,
+      (chat, helperProvider, chatModel, helperModel) => {
+        const env = {
+          MODEL_PROVIDER: chat,
+          [MODEL_PROVIDERS[chat].modelVar]: chatModel,
+          HELPER_PROVIDER: helperProvider,
+          HELPER_MODEL: helperModel,
+        };
+        const textModel = resolveModelProvider(env).model;
+        assert.deepEqual(resolveHelperProvider(env), {
+          name: chat,
+          model:
+            helperModel === undefined
+              ? MODEL_PROVIDERS[chat].defaultHelperModel || textModel
+              : helperModel.trim() || textModel,
+        });
+      },
+    ),
+  );
+});
+
+test("a named helper provider takes its own model variable, never the chat one", () => {
+  fc.assert(
+    fc.property(
+      providerName,
+      providerName,
+      modelValue,
+      modelValue,
+      modelValue,
+      (chat, helper, chatModel, helperOwnModel, helperModel) => {
+        const env = {
+          MODEL_PROVIDER: chat,
+          [MODEL_PROVIDERS[chat].modelVar]: chatModel,
+          [MODEL_PROVIDERS[helper].modelVar]:
+            chat === helper ? chatModel : helperOwnModel,
+          HELPER_PROVIDER: helper,
+          HELPER_MODEL: helperModel,
+        };
+        const own = modelProviderModel(
+          helper,
+          env[MODEL_PROVIDERS[helper].modelVar],
+        );
+        assert.deepEqual(resolveHelperProvider(env), {
+          name: helper,
+          model:
+            helperModel === undefined
+              ? MODEL_PROVIDERS[helper].defaultHelperModel || own
+              : helperModel.trim() || own,
+        });
+      },
+    ),
+  );
+});
+
+test("a helper provider outside the list fails start like MODEL_PROVIDER", () => {
+  for (const value of [
+    "ollmaa",
+    " ollama",
+    "OLLAMA",
+    "ollama,claude",
+    "__proto__",
+  ])
+    assert.throws(
+      () => resolveHelperProvider({ HELPER_PROVIDER: value }),
+      { message: invalidHelperProviderMessage(value) },
+      value,
+    );
+});
+
+test("a custom helper with an explicit model does not need CUSTOM_MODEL", () => {
+  assert.deepEqual(
+    resolveHelperProvider({ HELPER_PROVIDER: "custom", HELPER_MODEL: "m" }),
+    { name: "custom", model: "m" },
+  );
+  assert.throws(() => resolveHelperProvider({ HELPER_PROVIDER: "custom" }), {
+    message: missingModelMessage("custom"),
+  });
 });

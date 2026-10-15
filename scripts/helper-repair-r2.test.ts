@@ -105,7 +105,8 @@ for (const [provider, chat, helper] of [
         observed.models
           .slice(0, 3)
           .flatMap((m) => [m, m])
-          .concat(chat),
+          // Шаг без providerModelId подписан моделью своей роли: у помощника — его.
+          .concat(helper ?? chat),
       );
       assert.equal(observed.models[0], helper ?? chat);
       const completed = observed.events.filter(

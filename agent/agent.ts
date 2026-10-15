@@ -1,7 +1,7 @@
 import { resolveContextWindow } from "./lib/context-window.ts";
 import { claudeContextWindow } from "./lib/claude-cli.ts";
 import { isHelperTurn } from "./lib/eve-auth.ts";
-import { MODEL_PROVIDERS } from "./lib/model-provider.ts";
+import { resolveHelperProvider } from "./lib/model-provider.ts";
 import { defineAgent, defineDynamic } from "eve";
 // Провайдер и его модели — единый источник в provider.ts (тот же конфиг у agent/vision.ts
 // и the selected helper model).
@@ -10,6 +10,8 @@ import {
   providerName,
   compatibleThinkingEffort,
   providerConfig as cfg,
+  providerContextWindow,
+  replaysReasoningOf,
   withReplayableReasoning,
   makeTextModel,
 } from "./provider.js";
@@ -21,24 +23,29 @@ export function stepModelChoice(
   ctx: Parameters<typeof isHelperTurn>[0] & { session: { id: string } },
 ) {
   const helper = isHelperTurn(ctx);
-  const model = helper
-    ? process.env.HELPER_MODEL === undefined
-      ? MODEL_PROVIDERS[providerName].defaultHelperModel || cfg.textModel
-      : process.env.HELPER_MODEL.trim() || cfg.textModel
-    : cfg.textModel;
+  // Модель и провайдер помощника разрешает resolveHelperProvider (HELPER_PROVIDER, HELPER_MODEL).
+  // Читается на каждом шаге, как раньше HELPER_MODEL; неизвестное имя уже отбил старт provider.ts.
+  const { name: provider, model } = helper
+    ? resolveHelperProvider()
+    : { name: providerName, model: cfg.textModel };
   const contextWindow =
-    helper && providerName === "claude"
+    helper && provider === "claude"
       ? resolveContextWindow(
           "CLAUDE_CONTEXT_WINDOW",
           process.env.CLAUDE_CONTEXT_WINDOW,
           claudeContextWindow(model),
         )
-      : cfg.contextWindow;
+      : providerContextWindow(provider);
   return Object.freeze({
-    provider: providerName,
+    provider,
     model,
     contextWindow,
-    seesImages: () => chatModelSeesImages(model),
+    // ponytail: пробник картинок знает только провайдера чата; у другого провайдера
+    // помощника картинки видят лишь мультимодальные подписки codex и claude.
+    seesImages: () =>
+      provider === providerName
+        ? chatModelSeesImages(model)
+        : Promise.resolve(provider === "codex" || provider === "claude"),
     sessionId: ctx.session.id,
   });
 }
@@ -62,6 +69,7 @@ export default defineAgent({
               chatModelSeesImages: choice.seesImages,
               usage: stepUsageLabel(event, choice.sessionId),
             }),
+            replaysReasoningOf(choice.provider),
           ),
           modelContextWindowTokens: choice.contextWindow,
           modelCompactionThresholdPercent: compactionThresholdPercent(

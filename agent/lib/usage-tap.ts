@@ -122,6 +122,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type TapRow = {
   readonly source: "compaction" | "vision";
   readonly model: string;
+  // Провайдер вызова; не задан — провайдер чата.
+  readonly provider?: string;
   readonly label?: UsageLabel;
 };
 
@@ -142,7 +144,7 @@ export function recordTapUsage(
   const record = usageRecord(
     {
       source: row.source,
-      provider: PROVIDER,
+      provider: row.provider ?? PROVIDER,
       model: row.model,
       sessionId: row.label?.sessionId ?? "",
       turnId: `${row.label?.turnId ?? ""}#${row.source}`,
@@ -192,13 +194,14 @@ export async function recordVisionStreamUsage(
 export function compactionUsageMiddleware(
   label?: UsageLabel,
   model = TEXT_MODEL,
+  provider: string = PROVIDER,
 ): LanguageModelMiddleware {
   return {
     async wrapGenerate({ doGenerate, params }) {
       const result = await doGenerate();
       if (isCompactionPrompt(params.prompt))
         recordTapUsage(
-          { source: "compaction", model, label },
+          { source: "compaction", model, provider, label },
           providerUsageTokens(result.usage),
         );
       return result;

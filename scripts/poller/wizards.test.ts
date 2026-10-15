@@ -823,3 +823,58 @@ test("R1 switching provider resets helper model and stale helper cannot save", a
     /helper provider changed/,
   );
 });
+
+test("helper on its own provider: the screen validates against it and a chat switch keeps its model", async () => {
+  const env = {
+    MODEL_PROVIDER: "claude",
+    CLAUDE_MODEL: "claude-sonnet-5-5",
+    HELPER_PROVIDER: "ollama",
+    HELPER_MODEL: "glm-5.3-flash",
+    OLLAMA_API_KEY: "fixture",
+  };
+  const config = await currentConfig({ readEnv: async () => env });
+  assert.equal(config.helperProvider, "ollama");
+  assert.equal(config.helperModel, "ollama · glm-5.3-flash");
+  let written: Record<string, string | null> | undefined;
+  const options = {
+    readEnv: async () => env,
+    validate: async () => ({ id: "deepseek-v4-pro", reasoningLevels: [] }),
+    write: async (updates: Record<string, string | null>) => {
+      written = updates;
+    },
+  };
+  await validateAndSaveWizard(
+    {
+      flow: "model",
+      provider: "ollama",
+      model: "deepseek-v4-pro",
+      helperModel: true,
+    } as never,
+    options,
+  );
+  assert.deepEqual(written, { HELPER_MODEL: "deepseek-v4-pro" });
+  await assert.rejects(
+    validateAndSaveWizard(
+      {
+        flow: "model",
+        provider: "claude",
+        model: "claude-haiku-5-5",
+        helperModel: true,
+      } as never,
+      options,
+    ),
+    (error: unknown) =>
+      error instanceof ModelValidationError &&
+      error.message === "helper provider changed",
+  );
+  await validateAndSaveWizard(
+    {
+      flow: "model",
+      provider: "codex",
+      model: "gpt-5.5",
+      effort: null,
+    } as never,
+    options,
+  );
+  assert.equal(Object.hasOwn(written, "HELPER_MODEL"), false);
+});

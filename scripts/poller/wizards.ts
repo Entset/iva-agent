@@ -263,13 +263,22 @@ function thinkingAvailable(provider: string, env: Record<string, string>) {
       resolveOpenCodeProtocol(env.OPENCODE_PROTOCOL) === "chat-completions")
   );
 }
+// Провайдер помощника: HELPER_PROVIDER или, пусто, провайдер Ивы (тем же правилом, что
+// resolveHelperProvider в agent/lib/model-provider.ts).
+function helperProviderOf(env: Record<string, string>, provider: string) {
+  const own = env.HELPER_PROVIDER ?? "";
+  return own !== "" && catalogProvider(own) ? own : provider;
+}
 function helperModelLabel(provider: string, env: Record<string, string>) {
+  const helper = helperProviderOf(env, provider);
   const model = env.HELPER_MODEL?.trim();
-  return model === undefined
-    ? provider === "claude"
-      ? "claude-sonnet-5-5"
-      : tr("same as Iva", "как у Ивы")
-    : model || tr("same as Iva", "как у Ивы");
+  const label =
+    model === undefined
+      ? helper === "claude"
+        ? "claude-sonnet-5-5"
+        : tr("same as Iva", "как у Ивы")
+      : model || tr("same as Iva", "как у Ивы");
+  return helper === provider ? label : `${helper} · ${label}`;
 }
 export async function currentConfig({
   readEnv = () => readEnvValues(ENV_PATH),
@@ -291,6 +300,7 @@ export async function currentConfig({
     // нет: показать OLLAMA_MODEL значило бы назвать модель, к которой никто не пойдёт.
     model: catalogModel(configured, env) ?? "?",
     helperModel: helperModelLabel(provider, env),
+    helperProvider: helperProviderOf(env, provider),
     effort: adjustableThinking ? (env.THINKING_EFFORT ?? "").toLowerCase() : "",
   };
 }
@@ -1188,7 +1198,9 @@ function wizardUpdates(
   if (st.flow !== "model") return updates;
   const cat = CATALOG[st.provider];
   updates.MODEL_PROVIDER = st.provider;
-  if (st.provider !== (env.MODEL_PROVIDER ?? "ollama"))
+  // Модель помощника принадлежит его провайдеру: при своём HELPER_PROVIDER смена провайдера
+  // Ивы её не трогает.
+  if (st.provider !== (env.MODEL_PROVIDER ?? "ollama") && !env.HELPER_PROVIDER)
     updates.HELPER_MODEL = null;
   updates[cat.modelVar] = st.model;
   if (cat.baseVar && st.pendingBase) updates[cat.baseVar] = st.pendingBase;
@@ -1199,7 +1211,7 @@ function wizardUpdates(
 
 function assertHelperModelWindow(st: WizardState, env: Record<string, string>) {
   if (!st.helperModel) return;
-  if (st.provider !== (env.MODEL_PROVIDER ?? "ollama"))
+  if (st.provider !== helperProviderOf(env, env.MODEL_PROVIDER ?? "ollama"))
     throw new ModelValidationError(
       "invalid_selection",
       "helper provider changed",
@@ -1477,7 +1489,7 @@ async function onWizardRestartNow(st: WizardState): Promise<boolean> {
 async function onWizardHelper(st: WizardState): Promise<boolean> {
   const config = await currentConfig();
   if (!wizardIsCurrent(st)) return false;
-  st.provider = config.provider;
+  st.provider = config.helperProvider;
   st.helperModel = true;
   return showModelScreen(st);
 }

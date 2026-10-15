@@ -1,6 +1,9 @@
 import { defineHook } from "eve/hooks";
 import { TURN_KINDS, isHelperTurn } from "../lib/eve-auth.js";
-import { resolveModelProvider } from "../lib/model-provider.js";
+import {
+  resolveHelperProvider,
+  resolveModelProvider,
+} from "../lib/model-provider.js";
 import {
   appendUsage,
   parentFields,
@@ -46,6 +49,7 @@ interface StepData {
 
 /** Чей шаг: сессия, канал, имя инлайн-субагента и родитель сессии-ребёнка. */
 interface StepOwner {
+  readonly provider: string;
   readonly model: string;
   readonly sessionId: string;
   readonly source: string;
@@ -57,6 +61,13 @@ interface StepOwner {
 interface Initiator {
   readonly authenticator: string;
   readonly attributes: Readonly<Record<string, string | readonly string[]>>;
+}
+
+/** Провайдер и запасное имя модели шага: у помощника — свои (HELPER_PROVIDER). */
+function stepModelOf(ctx: Parameters<typeof isHelperTurn>[0]) {
+  if (!isHelperTurn(ctx)) return { provider: PROVIDER, model: TEXT_MODEL };
+  const helper = resolveHelperProvider();
+  return { provider: helper.name, model: helper.model };
 }
 
 /** Источник строки: вид хода Ивы из bearer-атрибута, иначе вид канала. */
@@ -100,7 +111,7 @@ function record(data: StepData, owner: StepOwner): void {
   const row = usageRecord(
     {
       source,
-      provider: PROVIDER,
+      provider: owner.provider,
       model: owner.model,
       sessionId,
       turnId: data.turnId ?? "",
@@ -122,8 +133,10 @@ export default defineHook({
       // отменяет решение о свёртке. Счёт ведётся только у сессии, открытой Telegram-каналом;
       // ребёнок встроенного agent идёт под своей сессией.
       recordStepInput(ctx.session.id, stepInputTokens(event.data.usage));
+      const step = stepModelOf(ctx);
       record(event.data, {
-        model: event.data.providerModelId ?? TEXT_MODEL,
+        provider: step.provider,
+        model: event.data.providerModelId ?? step.model,
         sessionId: ctx.session.id,
         source: sourceOf(ctx),
         parent: ctx.session.parent,
@@ -146,6 +159,7 @@ export default defineHook({
     "subagent.event": (event, ctx) => {
       const inner = event.data.event;
       if (inner.type === "step.completed") {
+        const step = stepModelOf(ctx);
         record(
           {
             ...inner.data,
@@ -156,7 +170,8 @@ export default defineHook({
             ),
           },
           {
-            model: inner.data.providerModelId ?? TEXT_MODEL,
+            provider: step.provider,
+            model: inner.data.providerModelId ?? step.model,
             sessionId: ctx.session.id,
             source: sourceOf(ctx),
             subagent: event.data.subagentName,

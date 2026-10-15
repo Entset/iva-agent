@@ -246,6 +246,18 @@ function visionModelFor(
   return configuredModel(name, raw, fallback ?? textModel);
 }
 
+/** Понимает ли провайдер reasoning_effort в chat/completions (у Go — только на этом проводе). */
+export function compatibleReasoningOf(
+  name: ModelProviderName,
+  env: Env = process.env,
+): boolean {
+  return (
+    MODEL_PROVIDERS[name].compatibleReasoning &&
+    (name !== "opencode" ||
+      resolveOpenCodeProtocol(env.OPENCODE_PROTOCOL) === "chat-completions")
+  );
+}
+
 /**
  * Разрешает MODEL_PROVIDER в одну согласованную четвёрку «имя · модель · vision · reasoning».
  * Бросает на любом значении, которого нет в MODEL_PROVIDER_NAMES.
@@ -258,8 +270,7 @@ export function resolveModelProvider(
     throw new Error(invalidModelProviderMessage(raw));
 
   const name = raw as ModelProviderName;
-  const { modelVar, visionModelVar, compatibleReasoning } =
-    MODEL_PROVIDERS[name];
+  const { modelVar, visionModelVar } = MODEL_PROVIDERS[name];
   const model = modelProviderModel(name, env[modelVar]);
   return {
     name,
@@ -270,9 +281,46 @@ export function resolveModelProvider(
       visionModelVar === null ? undefined : env[visionModelVar],
       model,
     ),
-    compatibleReasoning:
-      compatibleReasoning &&
-      (name !== "opencode" ||
-        resolveOpenCodeProtocol(env.OPENCODE_PROTOCOL) === "chat-completions"),
+    compatibleReasoning: compatibleReasoningOf(name, env),
   };
+}
+
+export function invalidHelperProviderMessage(raw: string): string {
+  return `Invalid HELPER_PROVIDER ${JSON.stringify(raw)}; expected one of: ${MODEL_PROVIDER_NAMES.join(", ")} or empty — run: iva config`;
+}
+
+export interface HelperProviderSelection {
+  readonly name: ModelProviderName;
+  readonly model: string;
+}
+
+/**
+ * Провайдер и модель помощника. HELPER_PROVIDER пуст или не задан — провайдер чата, и всё как
+ * до этой переменной. Задан — помощник ходит к своему провайдеру с его ключом и адресом из
+ * той же таблицы: чат ведёт одна подписка, а долгую работу оплачивает другая. Неизвестное имя
+ * валит старт, как у MODEL_PROVIDER.
+ *
+ * Модель — HELPER_MODEL; не задана — дефолт помощника у провайдера, иначе его модель чата
+ * (`<PROVIDER>_MODEL` или дефолт); пустая — модель чата этого провайдера.
+ */
+export function resolveHelperProvider(
+  env: Env = process.env,
+): HelperProviderSelection {
+  const main = resolveModelProvider(env);
+  const raw = env.HELPER_PROVIDER ?? "";
+  if (raw !== "" && !(MODEL_PROVIDER_NAMES as readonly string[]).includes(raw))
+    throw new Error(invalidHelperProviderMessage(raw));
+  const name = raw === "" ? main.name : (raw as ModelProviderName);
+  // Модель чата чужого провайдера нужна только как запасная: custom без CUSTOM_MODEL
+  // не должен валить старт, когда HELPER_MODEL назван явно.
+  const ownModel = () =>
+    name === main.name
+      ? main.model
+      : modelProviderModel(name, env[MODEL_PROVIDERS[name].modelVar]);
+  const helper = env.HELPER_MODEL;
+  const model =
+    helper === undefined
+      ? MODEL_PROVIDERS[name].defaultHelperModel || ownModel()
+      : helper.trim() || ownModel();
+  return { name, model };
 }

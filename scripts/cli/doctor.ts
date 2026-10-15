@@ -561,7 +561,39 @@ async function checkEnvFile(ctx: DoctorContext): Promise<boolean> {
   // на этой же машине. Молчать об этом значило бы объявить .env здоровым перед
   // отказом агента на старте.
   if (provider.auth === "cli") await checkClaudeCli(ctx);
+  await checkHelperProvider(ctx, rawProvider);
   return true;
+}
+
+/** Свой провайдер помощника (HELPER_PROVIDER): то же имя из каталога и его вход. */
+async function checkHelperProvider(
+  ctx: DoctorContext,
+  chatProvider: string,
+): Promise<void> {
+  const raw = ctx.env.HELPER_PROVIDER ?? "";
+  if (raw === "" || raw === chatProvider) return;
+  const helper = catalogProvider(raw);
+  if (!helper) {
+    ctx.fail(
+      `Invalid HELPER_PROVIDER ${JSON.stringify(raw)}; expected one of: ${Object.keys(CATALOG).join(", ")} or empty — run: iva config`,
+    );
+    return;
+  }
+  // Модель помощника — HELPER_MODEL или модель провайдера; без неё старт откажет сам.
+  const missing = providerEnvKeys(helper)
+    .filter((key) => key !== helper.modelVar)
+    .filter((key) => !(ctx.env[key] || "").trim());
+  if (
+    helper.auth === "oauth" &&
+    !existsSync(join(ctx.dataDirectory, "codex-auth.json"))
+  )
+    missing.push("OpenAI sign-in (iva login)");
+  if (missing.length)
+    ctx.fail(
+      `helper provider ${raw} incomplete, missing: ${missing.join(", ")} — run: iva config`,
+    );
+  else ctx.ok(`helper provider: ${raw}`);
+  if (helper.auth === "cli") await checkClaudeCli(ctx);
 }
 
 /** Статус Claude Code CLI: имя плана при входе и подсказка вместо него при отказе. */

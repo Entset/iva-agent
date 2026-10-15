@@ -2129,3 +2129,52 @@ test("doctor names a foreign auth variable instead of reporting claude as health
     "значение утекло в отчёт",
   );
 });
+
+test("doctor checks a helper provider of its own: name and sign-in keys", async (t) => {
+  async function diagnose(env: Record<string, string>) {
+    const root = await sandbox(t);
+    writeFileSync(join(root, ".env"), "MODEL_PROVIDER=ollama\n");
+    const failures: string[] = [];
+    const passes: string[] = [];
+    const runtime: CliRuntime = {
+      ...createCliRuntime(root),
+      C: NO_COLOR,
+      ok: (message) => passes.push(message),
+      warn: () => undefined,
+      bad: (message) => failures.push(message),
+      readEnv: () => ({ ...completeEnv(), ...env }),
+      hasSystemd: () => false,
+    };
+    await createDoctorCommand(runtime, lifecycle(), {
+      nodeVersion: "24.0.0",
+      log: () => undefined,
+      exit: () => undefined,
+    })();
+    return {
+      failures: failures.filter((m) =>
+        /HELPER_PROVIDER|helper provider/.test(m),
+      ),
+      passes: passes.filter((m) => m.startsWith("helper provider")),
+    };
+  }
+  assert.deepEqual(await diagnose({ HELPER_PROVIDER: "openrouter" }), {
+    failures: [
+      "helper provider openrouter incomplete, missing: OPENROUTER_API_KEY — run: iva config",
+    ],
+    passes: [],
+  });
+  assert.deepEqual(
+    await diagnose({ HELPER_PROVIDER: "openrouter", OPENROUTER_API_KEY: "k" }),
+    { failures: [], passes: ["helper provider: openrouter"] },
+  );
+  assert.deepEqual(await diagnose({ HELPER_PROVIDER: "ollmaa" }), {
+    failures: [
+      'Invalid HELPER_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom or empty — run: iva config',
+    ],
+    passes: [],
+  });
+  assert.deepEqual(await diagnose({ HELPER_PROVIDER: "" }), {
+    failures: [],
+    passes: [],
+  });
+});

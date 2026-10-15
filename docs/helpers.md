@@ -13,6 +13,12 @@ repeating the task requires the owner’s request. Closing running work preserve
 message for manual reading; closing ready work withdraws automatic reporting.
 Actions already performed stay facts.
 
+## Model
+
+The helper runs on `HELPER_MODEL`, and with `HELPER_PROVIDER` on a provider of its
+own: the chat model leads the conversation, the helper model does the long work.
+Variables and an example: [configuration.md](configuration.md#helper-model-and-provider).
+
 ## Limits
 
 Times ending in MS are milliseconds. The work counter

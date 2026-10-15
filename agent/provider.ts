@@ -29,6 +29,8 @@ import {
 import { resolveContextWindow } from "./lib/context-window.ts";
 import {
   MODEL_PROVIDERS,
+  compatibleReasoningOf,
+  resolveHelperProvider,
   resolveModelProvider,
   type ModelProviderName,
 } from "./lib/model-provider.ts";
@@ -146,6 +148,10 @@ export const providerConfig = {
   visionModel: selected.visionModel,
 };
 
+// Помощник может ходить к своему провайдеру (HELPER_PROVIDER): адрес и ключ — из той же
+// таблицы PROVIDERS, поэтому второго источника ключей нет. Пусто — провайдер чата.
+const helperSelection = resolveHelperProvider();
+
 // Адрес чужого эндпоинта не угадывается: без него запрос ушёл бы в пустую строку и агент
 // молчал бы, не назвав причину. Отказ здесь же, на загрузке модуля, — как у неизвестного
 // MODEL_PROVIDER, и ровно тем же списком обязательных ключей ругается `iva doctor`.
@@ -153,6 +159,28 @@ if (providerName === "custom" && !providerConfig.baseURL)
   throw new Error(
     "MODEL_PROVIDER=custom requires CUSTOM_BASE_URL (OpenAI-compatible base, e.g. https://api.example.com/v1) — run: iva config",
   );
+if (helperSelection.name === "custom" && !PROVIDERS.custom.baseURL)
+  throw new Error(
+    "HELPER_PROVIDER=custom requires CUSTOM_BASE_URL (OpenAI-compatible base, e.g. https://api.example.com/v1) — run: iva config",
+  );
+
+// Протокол Go — уже разрешённый, если Go ведёт чат; иначе читается, только когда Go
+// нужен помощнику, поэтому чужое значение OPENCODE_PROTOCOL остальным старт не валит.
+const opencodeProtocol = () =>
+  providerConfig.opencodeProtocol ??
+  resolveOpenCodeProtocol(process.env.OPENCODE_PROTOCOL);
+if (helperSelection.name === "opencode") opencodeProtocol();
+
+/** Окно контекста провайдера: у провайдера чата — уже разрешённое, у остального — своё. */
+export function providerContextWindow(name: ModelProviderName): number {
+  if (name === providerName) return providerConfig.contextWindow;
+  const variable = `${name.toUpperCase()}_CONTEXT_WINDOW`;
+  return resolveContextWindow(
+    variable,
+    process.env[variable],
+    PROVIDERS[name].contextWindow,
+  );
+}
 
 // --- OpenCode Go: что провайдер требует от клиента --------------------------------------------
 // С сентября 2026 Go принимает запрос только от клиента, который (1) называет себя своим
@@ -189,11 +217,12 @@ function wireSessionId(sessionId?: string): string {
   return id.length > 0 ? id : PROCESS_SESSION_ID;
 }
 
-/** Заголовки клиента для активного провайдера. Требует их только Go; остальным — ничего. */
+/** Заголовки клиента для провайдера (по умолчанию — чата). Требует их только Go; остальным — ничего. */
 export function providerRequestHeaders(
   sessionId?: string,
+  provider: ModelProviderName = providerName,
 ): Record<string, string> | undefined {
-  if (providerName !== "opencode") return undefined;
+  if (provider !== "opencode") return undefined;
   return {
     "x-opencode-session": wireSessionId(sessionId),
     "user-agent": IVA_USER_AGENT,
@@ -225,13 +254,30 @@ const COMPATIBLE_EFFORTS = ["low", "medium", "high"] as const;
 type CompatibleEffort = (typeof COMPATIBLE_EFFORTS)[number];
 // CUSTOM_REASONING=1 (.env): владелец custom-эндпоинта подтверждает, что тот понимает
 // reasoning_effort (Meta Model API, vLLM с reasoning-моделью). По умолчанию — не шлём.
-const customReasoning =
-  selected.name === "custom" && process.env.CUSTOM_REASONING === "1";
-export const compatibleThinkingEffort: CompatibleEffort | undefined =
-  (selected.compatibleReasoning || customReasoning) &&
-  (COMPATIBLE_EFFORTS as readonly string[]).includes(effortRaw)
+function compatibleEffortOf(selection: {
+  name: ModelProviderName;
+  compatibleReasoning: boolean;
+}): CompatibleEffort | undefined {
+  const customReasoning =
+    selection.name === "custom" && process.env.CUSTOM_REASONING === "1";
+  return (selection.compatibleReasoning || customReasoning) &&
+    (COMPATIBLE_EFFORTS as readonly string[]).includes(effortRaw)
     ? (effortRaw as CompatibleEffort)
     : undefined;
+}
+export const compatibleThinkingEffort = compatibleEffortOf(selected);
+
+// eve шлёт один reasoning на весь агент — по провайдеру чата. Модель другого провайдера
+// получает свой ответ на тот же THINKING_EFFORT: Go/Ollama — reasoning_effort, а codex и
+// claude, как и в роли чата, — ничего (их усилие идёт своими путями).
+function reasoningEffortMiddleware(
+  effort: CompatibleEffort | undefined,
+): LanguageModelMiddleware {
+  return {
+    transformParams: ({ params }) =>
+      Promise.resolve({ ...params, reasoning: effort }),
+  };
+}
 
 // --- Codex (подписка ChatGPT): Responses API через @ai-sdk/openai ----------------------------
 // Кастомный fetch: перед КАЖДЫМ запросом подставляет свежий Bearer + ChatGPT-Account-ID
@@ -824,27 +870,42 @@ const liveWireObserver = (model: string): LanguageModelMiddleware => ({
  */
 export function makeTextModel(options: {
   model?: string;
+  // Провайдер модели; не задан — провайдер чата. Другой бывает только у помощника.
+  provider?: ModelProviderName;
   sessionId?: string;
   chatModelSeesImages: ImageCapability;
   // Чей шаг ведёт модель: расход компактации eve уходит в usage.jsonl под этим ходом.
   usage?: UsageLabel;
 }) {
+  const provider = options.provider ?? providerName;
   return wrapLanguageModel({
     model: makeBareTextModel(
       options.model ?? providerConfig.textModel,
       options.sessionId,
+      provider,
     ),
     middleware: [
+      ...(provider === providerName
+        ? []
+        : [
+            reasoningEffortMiddleware(
+              compatibleEffortOf({
+                name: provider,
+                compatibleReasoning: compatibleReasoningOf(provider),
+              }),
+            ),
+          ]),
       repeatGuardMiddleware,
       attachImagesMiddleware(options.chatModelSeesImages),
       toolSchemaRetryMiddleware,
       modelFirstChunkDeadlineMiddleware,
       adjacentUserMessagesMiddleware,
       // Порядок свободен: кодирование идемпотентно, других читателей toolName в цепочке нет.
-      toolNameWireMiddleware(MODEL_PROVIDERS[providerName].toolNameMax),
+      toolNameWireMiddleware(MODEL_PROVIDERS[provider].toolNameMax),
       compactionUsageMiddleware(
         options.usage,
         options.model ?? providerConfig.textModel,
+        provider,
       ),
       // prettier-ignore
       ...(process.env.IVA_LIVE_WIRE === "1" ? [liveWireObserver(options.model ?? providerConfig.textModel)] : []),
@@ -865,7 +926,7 @@ export function makeOpenCodeModel(
   const config = {
     baseURL: PROVIDERS.opencode.baseURL,
     apiKey: PROVIDERS.opencode.apiKey,
-    headers: providerRequestHeaders(sessionId),
+    headers: providerRequestHeaders(sessionId, "opencode"),
     fetch: opencodeFetch,
   };
   return protocol === "responses"
@@ -877,24 +938,23 @@ export function makeOpenCodeModel(
       })(model);
 }
 
-function makeBareTextModel(model: string, sessionId?: string) {
+function makeBareTextModel(
+  model: string,
+  sessionId?: string,
+  provider: ModelProviderName = providerName,
+) {
   // Codex-подписка говорит на Responses API — отдельная модель-фабрика (@ai-sdk/openai).
   // Claude-подписка — тоже своя модель: рукописная LanguageModelV4 поверх Claude Code CLI
   // (stream-json), потому что API-адреса у неё нет вовсе.
   // Go выбирает провод явно; остальные API-ключи говорят chat/completions.
-  if (providerName === "codex") return makeCodexModel(model, sessionId);
-  if (providerName === "claude")
-    return makeClaudeCliModel(model, { sessionId });
-  if (providerName === "opencode")
-    return makeOpenCodeModel(
-      model,
-      providerConfig.opencodeProtocol!,
-      sessionId,
-    );
+  if (provider === "codex") return makeCodexModel(model, sessionId);
+  if (provider === "claude") return makeClaudeCliModel(model, { sessionId });
+  if (provider === "opencode")
+    return makeOpenCodeModel(model, opencodeProtocol(), sessionId);
   return createOpenAICompatible({
-    name: `iva-${providerName}`,
-    baseURL: providerConfig.baseURL,
-    apiKey: providerConfig.apiKey,
+    name: `iva-${provider}`,
+    baseURL: PROVIDERS[provider].baseURL,
+    apiKey: PROVIDERS[provider].apiKey,
     // Без этого стрим OpenAI-совместимых провайдеров НЕ несёт usage (нет stream_options:
     // {include_usage:true}) → событие step.completed приходит без поля usage, и учёт токенов
     // (agent/hooks/usage.ts) пуст. Включаем, чтобы провайдер отдавал расход в финальном чанке.
@@ -985,12 +1045,18 @@ export function reasoningReplayMiddleware(
   };
 }
 
-/** Оборачивает текстовую модель правилом возврата рассуждения активного вендора. */
+/** Возвращает ли вендор рассуждение в историю (у Go — только на chat/completions). */
+export function replaysReasoningOf(provider: ModelProviderName): boolean {
+  return (
+    MODEL_PROVIDERS[provider].replaysReasoning &&
+    (provider !== "opencode" || opencodeProtocol() === "chat-completions")
+  );
+}
+
+/** Оборачивает текстовую модель правилом возврата рассуждения вендора (по умолчанию — чата). */
 export function withReplayableReasoning(
   model: WrappableModel,
-  replays: boolean = MODEL_PROVIDERS[providerName].replaysReasoning &&
-    (providerName !== "opencode" ||
-      providerConfig.opencodeProtocol === "chat-completions"),
+  replays: boolean = replaysReasoningOf(providerName),
 ): WrappableModel {
   return wrapLanguageModel({
     model,

@@ -59,6 +59,27 @@ For `codex` there is no API key in `.env`: run `iva login` (device code, headles
 
 For `claude` there is no API key either: install the CLI on the server as the service user (`npm install -g --prefix ~/.local @anthropic-ai/claude-code`, no root) and sign it in once (`claude auth login`). Iva never sees a key — it calls that CLI, and `iva doctor` reports the plan from `claude auth status`. Keep `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_BASE_URL` and any `CLAUDE_CODE_USE_*` out of `.env`: each of them sends the CLI somewhere other than your subscription, so Iva refuses to use this provider and says which variable is in the way rather than quietly ignoring it. Full flow: [providers.md](./providers.md#claude-by-promax-subscription-claude).
 
+### Helper model and provider
+
+A [helper](helpers.md) can run on a cheaper model than the chat, or on another provider entirely: Claude or ChatGPT keeps the conversation and decides what to do, while the long tool-heavy work and most of the tokens go to Ollama or OpenCode.
+
+| Variable          | Default   | Description                                                                                                                                                                                                                              |
+| ----------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HELPER_PROVIDER` | _(empty)_ | Provider of the helper, one of the `MODEL_PROVIDER` names. Empty = the chat provider. A named provider uses its own block above — key, address, `*_CONTEXT_WINDOW` — so fill that block too. An unknown name stops the agent at startup. |
+| `HELPER_MODEL`    | _(empty)_ | Helper model on the helper provider. Not set = that provider's helper default (`claude-sonnet-5-5` on `claude`), otherwise its `*_MODEL`; blank = its `*_MODEL`. `/model` → «Модель помощника» writes it.                                |
+
+Example — Claude leads, Ollama works:
+
+```bash
+MODEL_PROVIDER=claude
+CLAUDE_MODEL=claude-sonnet-5-5
+HELPER_PROVIDER=ollama
+HELPER_MODEL=deepseek-v4-pro
+OLLAMA_API_KEY=...
+```
+
+`THINKING_EFFORT` reaches the helper by the rules of its own provider. Usage rows carry the provider and model of each step, so `iva usage by-model` shows the split. `iva doctor` checks the helper provider's name and keys. With a provider other than the chat's, the helper takes pictures only on `codex` and `claude`. Run `iva restart` after a manual edit.
+
 **Don't inflate the context window.** Iva compacts the conversation between turns once a turn's input reaches 60% of this number (or 275,000 tokens, whichever is smaller), and inside a turn a quarter above that as a safety net. Set it above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
 
 ## Telegram
