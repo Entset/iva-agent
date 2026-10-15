@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { z } from "zod";
 import { isHelperTurn } from "./eve-auth.ts";
 import { traceHelper } from "./trace.ts";
@@ -17,11 +18,23 @@ export type HelperToolContext = {
   };
 };
 export const helperInputSchema = z.strictObject({
-  action: z.enum(["start", "list", "close", "outcome"]),
+  action: z.enum(["start", "list", "close", "outcome", "revise"]),
   task: z.string().optional(),
   may: z.string().optional(),
   id: z.string().optional(),
 });
+// ponytail: round lives in the task prefix, no schema field; add `parent` to rows if chains need listing
+export const HELPER_MAX_REVISIONS = 2;
+export function revisionTask(row: s.HelperRow, fix: string) {
+  const round = Number(/^Revision (\d+)/.exec(row.task)?.[1] ?? 0) + 1;
+  if (round > HELPER_MAX_REVISIONS) return null;
+  const path = s.helperResultPath(row.id);
+  const original = row.task.split("\nOriginal task: ").pop()!;
+  return `Revision ${round} of ${row.id}. Your previous result: ${existsSync(path) ? path : row.summary}
+Fix only what Iva's review asks; keep what was right; return the full corrected result.
+Corrections from Iva: ${fix.trim()}
+Original task: ${original}`.slice(0, 2000);
+}
 export function helperAuth(ctx: {
   session?: Partial<Pick<HelperToolContext["session"], "auth">>;
 }): s.HelperChat | null {
@@ -73,6 +86,20 @@ export async function helperExecute(
       }
       void (deps.tick ?? runHelperTick)().catch(console.error);
       return `${r.row.id}. Allowed: ${r.row.may || "nothing, look and draft only"}. The helper works in the background. Answer the owner now that you handed the work off; do not answer for the helper. When it finishes you will get a system event.`;
+    }
+    if (v.action === "revise") {
+      const prev = await s.showHelper(v.id ?? "", chat);
+      if (!prev.ok) return prev.text;
+      if (prev.row.outcome !== "done" && prev.row.outcome !== "empty")
+        return "Доработка только по готовому исходу; неудачу повторяй с разрешения владельца.";
+      if (!v.task?.trim()) return "Опиши корректировки в task.";
+      const task = revisionTask(prev.row, v.task);
+      if (!task)
+        return `Лимит доработок (${HELPER_MAX_REVISIONS}) исчерпан. Расскажи владельцу исход как есть и свои замечания.`;
+      const r = await s.addHelper({ task, may: prev.row.may, chat }, now);
+      if (!r.ok) return r.text;
+      void (deps.tick ?? runHelperTick)().catch(console.error);
+      return `${r.row.id}: доработка ${prev.row.id} запущена с теми же границами. Коротко скажи владельцу, что проверила и что отправила на доработку.`;
     }
     if (v.action === "list")
       return JSON.stringify(
