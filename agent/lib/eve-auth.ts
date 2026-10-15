@@ -53,6 +53,9 @@ export function isHelperTurn(
   );
 }
 
+/** Шаги хода без владельца: на последнем eve снимает инструменты, и ход подводит итог. */
+export const TURN_MAX_STEPS = "80";
+
 /** Service attributes are accepted only after bearer authentication. */
 function serviceAuth(
   request: Request,
@@ -60,13 +63,20 @@ function serviceAuth(
   const turn = request.headers.get("x-iva-turn");
   if (turn === null || !TURN_KINDS.has(turn)) return SERVICE_AUTH;
   if (turn !== "helper")
-    return { ...SERVICE_AUTH, attributes: { iva_turn: turn } };
+    return {
+      ...SERVICE_AUTH,
+      attributes: { iva_turn: turn, iva_max_steps: TURN_MAX_STEPS },
+    };
   const id = request.headers.get("x-iva-helper");
   if (id === null || !/^h-[0-9a-f]{6}$/.test(id))
     throw new UnauthenticatedError();
   return {
     ...SERVICE_AUTH,
-    attributes: { iva_turn: turn, iva_helper: id, iva_max_steps: "80" },
+    attributes: {
+      iva_turn: turn,
+      iva_helper: id,
+      iva_max_steps: TURN_MAX_STEPS,
+    },
   };
 }
 
