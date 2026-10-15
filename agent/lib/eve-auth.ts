@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { helperRuns } from "./model-provider.ts";
 import {
   extractBearerToken,
   UnauthenticatedError,
@@ -51,6 +52,22 @@ export function isHelperTurn(
       auth?.authenticator === "iva-bearer" &&
       auth.attributes?.iva_turn === "helper",
   );
+}
+
+/**
+ * Идёт ли ход на провайдере и модели помощника: сам помощник или вид хода Ивы из HELPER_RUNS.
+ * Вид берётся только у инициатора с bearer — как `source` в учёте расхода.
+ */
+export function runsOnHelperModel(
+  ctx: Parameters<typeof isHelperTurn>[0],
+): boolean {
+  if (isHelperTurn(ctx)) return true;
+  const initiator = ctx?.session?.auth?.initiator;
+  const turn =
+    initiator?.authenticator === "iva-bearer"
+      ? initiator.attributes?.iva_turn
+      : undefined;
+  return typeof turn === "string" && helperRuns().has(turn);
 }
 
 /** Service attributes are accepted only after bearer authentication. */

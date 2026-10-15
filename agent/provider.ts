@@ -30,6 +30,7 @@ import { resolveContextWindow } from "./lib/context-window.ts";
 import {
   MODEL_PROVIDERS,
   compatibleReasoningOf,
+  helperRuns,
   resolveHelperProvider,
   resolveModelProvider,
   type ModelProviderName,
@@ -151,6 +152,8 @@ export const providerConfig = {
 // Помощник может ходить к своему провайдеру (HELPER_PROVIDER): адрес и ключ — из той же
 // таблицы PROVIDERS, поэтому второго источника ключей нет. Пусто — провайдер чата.
 const helperSelection = resolveHelperProvider();
+// Список HELPER_RUNS с чужим словом валит старт здесь же, а не на первом брифе.
+helperRuns();
 
 // Адрес чужого эндпоинта не угадывается: без него запрос ушёл бы в пустую строку и агент
 // молчал бы, не назвав причину. Отказ здесь же, на загрузке модуля, — как у неизвестного

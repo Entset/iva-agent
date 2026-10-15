@@ -11,10 +11,14 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
+import { TURN_KINDS } from "./eve-auth.ts";
 import {
+  HELPER_RUN_KINDS,
   MODEL_PROVIDERS,
   MODEL_PROVIDER_NAMES,
+  helperRuns,
   invalidHelperProviderMessage,
+  invalidHelperRunsMessage,
   invalidModelProviderMessage,
   missingModelMessage,
   modelProviderModel,
@@ -1041,4 +1045,36 @@ test("a custom helper with an explicit model does not need CUSTOM_MODEL", () => 
   assert.throws(() => resolveHelperProvider({ HELPER_PROVIDER: "custom" }), {
     message: missingModelMessage("custom"),
   });
+});
+
+// HELPER_RUNS: какие ходы Ивы без владельца и ночь идут на модели помощника.
+test("HELPER_RUNS names exactly the turn kinds without the owner, plus the night rollup", () => {
+  assert.deepEqual(
+    [...HELPER_RUN_KINDS].filter((kind) => kind !== "rollup").sort(),
+    [...TURN_KINDS].filter((kind) => kind !== "helper").sort(),
+  );
+});
+
+test("HELPER_RUNS parses any spacing of a known list and refuses any other word", () => {
+  fc.assert(
+    fc.property(
+      fc.subarray([...HELPER_RUN_KINDS]),
+      fc.array(fc.constantFrom("", " ", "  "), { minLength: 1 }),
+      (kinds, pads) => {
+        const raw = kinds
+          .map((kind, i) => `${pads[i % pads.length]}${kind}${pads[0]}`)
+          .join(",");
+        assert.deepEqual(
+          [...helperRuns({ HELPER_RUNS: raw })].sort(),
+          [...kinds].sort(),
+        );
+      },
+    ),
+  );
+  assert.equal(helperRuns({}).size, 0);
+  assert.equal(helperRuns({ HELPER_RUNS: " , " }).size, 0);
+  for (const entry of ["chat", "helper", "Brief", "night", "memory-night"])
+    assert.throws(() => helperRuns({ HELPER_RUNS: `brief,${entry}` }), {
+      message: invalidHelperRunsMessage(entry),
+    });
 });

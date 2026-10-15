@@ -148,3 +148,70 @@ test("chat and helper reach their own providers with their own keys, effort and 
     ],
   );
 });
+
+test("HELPER_RUNS moves the named turn kinds and the night onto the helper provider", async (t) => {
+  t.after(() => {
+    delete process.env.HELPER_RUNS;
+  });
+  const turn = (kind: string) => ({
+    session: {
+      id: kind,
+      auth: {
+        initiator: {
+          authenticator: "iva-bearer",
+          attributes: { iva_turn: kind },
+        },
+      },
+    },
+  });
+  const chosen = () =>
+    ["brief", "reminder", "watch"].map((kind) => {
+      const { provider, model } = stepModelChoice(turn(kind));
+      return [kind, provider, model];
+    });
+  delete process.env.HELPER_RUNS;
+  assert.deepEqual(chosen(), [
+    ["brief", "openrouter", "vendor/chat-fixture"],
+    ["reminder", "openrouter", "vendor/chat-fixture"],
+    ["watch", "openrouter", "vendor/chat-fixture"],
+  ]);
+  process.env.HELPER_RUNS = "brief, watch";
+  assert.deepEqual(chosen(), [
+    ["brief", "ollama", "helper-fixture"],
+    ["reminder", "openrouter", "vendor/chat-fixture"],
+    ["watch", "ollama", "helper-fixture"],
+  ]);
+  // Вид хода берётся только у инициатора с bearer: Telegram-ход остаётся чатом.
+  assert.equal(
+    stepModelChoice({
+      session: {
+        id: "tg",
+        auth: {
+          initiator: {
+            authenticator: "telegram-webhook",
+            attributes: { iva_turn: "brief" },
+          },
+        },
+      },
+    }).provider,
+    "openrouter",
+  );
+
+  const { runNode } = await import("./lib/eve-app.ts");
+  const night = async (runs: string) => {
+    const logs: string[] = [];
+    await runNode(
+      [
+        "--input-type=module",
+        "-e",
+        "import './scripts/lib/ts-esm-hooks.ts'; const {nightModelName}=await import('./scripts/memory/night-call.ts'); console.log(nightModelName);",
+      ],
+      process.cwd(),
+      { ...process.env, HELPER_RUNS: runs },
+      (line) => logs.push(line),
+    );
+    return logs.at(-1);
+  };
+  assert.equal(await night(""), "vendor/chat-fixture");
+  assert.equal(await night("rollup"), "helper-fixture");
+});

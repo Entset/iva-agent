@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { streamText } from "ai";
 import type { ZodType } from "zod";
 import { makeTextModel, providerConfig, providerName } from "#provider.ts";
+import { helperRuns, resolveHelperProvider } from "#lib/model-provider.ts";
 import { appendUsage, usageRecord } from "#lib/usage.ts";
 import { sdkUsageTokens } from "#lib/usage-tap.ts";
 import { NIGHT_CEILING } from "#lib/memory-night-constants.ts";
@@ -16,15 +17,21 @@ export class NightCeilingError extends Error {}
 export class NightSchemaError extends Error {}
 class NightNetworkError extends Error {}
 
-export const nightModelName = providerConfig.textModel;
+// Ночь идёт на модели чата, а с `rollup` в HELPER_RUNS — на провайдере и модели помощника.
+const night = helperRuns().has("rollup")
+  ? resolveHelperProvider()
+  : { name: providerName, model: providerConfig.textModel };
+export const nightModelName = night.model;
 const model = makeTextModel({
+  model: night.model,
+  provider: night.name,
   chatModelSeesImages: () => Promise.resolve(false),
 });
 const SYSTEM =
   "Ты выполняешь один шаг ночной памяти. Ответ — один JSON-объект по формату из инструкции, без пояснений.";
 // Низкое рассуждение там, где провайдер его принимает.
 const openai = { reasoningEffort: "low", reasoningSummary: null };
-const low = providerName === "codex" ? { providerOptions: { openai } } : {};
+const low = night.name === "codex" ? { providerOptions: { openai } } : {};
 
 export const ceiling = {
   calls: 0,
@@ -55,7 +62,7 @@ function recordUsage(
   const turnId = `memory-night#${randomUUID()}`;
   const meta = {
     source: "memory-night",
-    provider: providerName,
+    provider: night.name,
     model: nightModelName,
     sessionId: "",
     turnId,

@@ -17,6 +17,8 @@ Actions already performed stay facts.
 
 The helper runs on `HELPER_MODEL`, and with `HELPER_PROVIDER` on a provider of its
 own: the chat model leads the conversation, the helper model does the long work.
+`HELPER_RUNS` moves Brief, Watch, reminders, the nightly memory and the other turns
+without the owner onto the same model.
 Variables and an example: [configuration.md](configuration.md#helper-model-and-provider).
 
 ## Limits

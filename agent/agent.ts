@@ -1,6 +1,6 @@
 import { resolveContextWindow } from "./lib/context-window.ts";
 import { claudeContextWindow } from "./lib/claude-cli.ts";
-import { isHelperTurn } from "./lib/eve-auth.ts";
+import { isHelperTurn, runsOnHelperModel } from "./lib/eve-auth.ts";
 import { resolveHelperProvider } from "./lib/model-provider.ts";
 import { defineAgent, defineDynamic } from "eve";
 // Провайдер и его модели — единый источник в provider.ts (тот же конфиг у agent/vision.ts
@@ -22,7 +22,8 @@ import { chatModelSeesImages } from "./vision.js";
 export function stepModelChoice(
   ctx: Parameters<typeof isHelperTurn>[0] & { session: { id: string } },
 ) {
-  const helper = isHelperTurn(ctx);
+  // Помощник и виды хода из HELPER_RUNS идут на провайдере и модели помощника.
+  const helper = runsOnHelperModel(ctx);
   // Модель и провайдер помощника разрешает resolveHelperProvider (HELPER_PROVIDER, HELPER_MODEL).
   // Читается на каждом шаге, как раньше HELPER_MODEL; неизвестное имя уже отбил старт provider.ts.
   const { name: provider, model } = helper

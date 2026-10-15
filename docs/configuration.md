@@ -63,10 +63,11 @@ For `claude` there is no API key either: install the CLI on the server as the se
 
 A [helper](helpers.md) can run on a cheaper model than the chat, or on another provider entirely: Claude or ChatGPT keeps the conversation and decides what to do, while the long tool-heavy work and most of the tokens go to Ollama or OpenCode.
 
-| Variable          | Default   | Description                                                                                                                                                                                                                              |
-| ----------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HELPER_PROVIDER` | _(empty)_ | Provider of the helper, one of the `MODEL_PROVIDER` names. Empty = the chat provider. A named provider uses its own block above — key, address, `*_CONTEXT_WINDOW` — so fill that block too. An unknown name stops the agent at startup. |
-| `HELPER_MODEL`    | _(empty)_ | Helper model on the helper provider. Not set = that provider's helper default (`claude-sonnet-5-5` on `claude`), otherwise its `*_MODEL`; blank = its `*_MODEL`. `/model` → «Модель помощника» writes it.                                |
+| Variable          | Default   | Description                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HELPER_PROVIDER` | _(empty)_ | Provider of the helper, one of the `MODEL_PROVIDER` names. Empty = the chat provider. A named provider uses its own block above — key, address, `*_CONTEXT_WINDOW` — so fill that block too. An unknown name stops the agent at startup.                                                                                                                            |
+| `HELPER_MODEL`    | _(empty)_ | Helper model on the helper provider. Not set = that provider's helper default (`claude-sonnet-5-5` on `claude`), otherwise its `*_MODEL`; blank = its `*_MODEL`. `/model` → «Модель помощника» writes it.                                                                                                                                                           |
+| `HELPER_RUNS`     | _(empty)_ | Comma list of what else runs on the helper provider and model: `watch`, `brief`, `insight`, `reminder`, `signal`, `alert` (Iva's turns without you) and `rollup` (the nightly memory). Empty = everything on the chat model. A reminder carries out your request with tools — leave it out to keep it on the chat model. Any other word stops the agent at startup. |
 
 Example — Claude leads, Ollama works:
 
@@ -75,6 +76,7 @@ MODEL_PROVIDER=claude
 CLAUDE_MODEL=claude-sonnet-5-5
 HELPER_PROVIDER=ollama
 HELPER_MODEL=deepseek-v4-pro
+HELPER_RUNS=brief,watch,insight,signal,alert,rollup
 OLLAMA_API_KEY=...
 ```
 

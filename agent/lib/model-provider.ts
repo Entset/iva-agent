@@ -285,6 +285,37 @@ export function resolveModelProvider(
   };
 }
 
+/**
+ * Что, кроме самих помощников, идёт на провайдер и модель помощника (HELPER_RUNS): виды хода
+ * Ивы без владельца (заголовок x-iva-turn) и ночная сборка памяти — `rollup`. Список, а не
+ * флажок: напоминание исполняет просьбу владельца, и его кто-то оставит на модели чата.
+ */
+export const HELPER_RUN_KINDS = [
+  "watch",
+  "brief",
+  "insight",
+  "reminder",
+  "signal",
+  "alert",
+  "rollup",
+] as const;
+
+export function invalidHelperRunsMessage(entry: string): string {
+  return `Invalid HELPER_RUNS entry ${JSON.stringify(entry)}; expected a comma list of: ${HELPER_RUN_KINDS.join(", ")} — run: iva config`;
+}
+
+/** Разобранный HELPER_RUNS. Пусто — ничего, как до этой переменной; чужое слово валит старт. */
+export function helperRuns(env: Env = process.env): ReadonlySet<string> {
+  const entries = (env.HELPER_RUNS ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  for (const entry of entries)
+    if (!(HELPER_RUN_KINDS as readonly string[]).includes(entry))
+      throw new Error(invalidHelperRunsMessage(entry));
+  return new Set(entries);
+}
+
 export function invalidHelperProviderMessage(raw: string): string {
   return `Invalid HELPER_PROVIDER ${JSON.stringify(raw)}; expected one of: ${MODEL_PROVIDER_NAMES.join(", ")} or empty — run: iva config`;
 }

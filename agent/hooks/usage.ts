@@ -1,5 +1,9 @@
 import { defineHook } from "eve/hooks";
-import { TURN_KINDS, isHelperTurn } from "../lib/eve-auth.js";
+import {
+  TURN_KINDS,
+  isHelperTurn,
+  runsOnHelperModel,
+} from "../lib/eve-auth.js";
 import {
   resolveHelperProvider,
   resolveModelProvider,
@@ -63,9 +67,9 @@ interface Initiator {
   readonly attributes: Readonly<Record<string, string | readonly string[]>>;
 }
 
-/** Провайдер и запасное имя модели шага: у помощника — свои (HELPER_PROVIDER). */
+/** Провайдер и запасное имя модели шага: у помощника и HELPER_RUNS — свои (HELPER_PROVIDER). */
 function stepModelOf(ctx: Parameters<typeof isHelperTurn>[0]) {
-  if (!isHelperTurn(ctx)) return { provider: PROVIDER, model: TEXT_MODEL };
+  if (!runsOnHelperModel(ctx)) return { provider: PROVIDER, model: TEXT_MODEL };
   const helper = resolveHelperProvider();
   return { provider: helper.name, model: helper.model };
 }
